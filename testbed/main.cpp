@@ -24,8 +24,6 @@ struct Matrix {
 	float m[4][4];
 };
 
-
-
 // NOTE: These variable will be available to shaders through push constant uniform
 struct ShaderConstants {
 	Matrix projection;
@@ -52,11 +50,16 @@ float sphere_radius = 1.0f;
 bool sphere_needs_update = false;
 
 Vector model_position = {0.0f, 0.0f, 5.0f};
-float model_rotation;
-float model_deformation;
-Vector model_color = {0.5f, 1.0f, 0.7f };
+float model_rotation = 0.0f;
+float model_deformation = 2.0f;
+Vector model_color = {0.5f, 1.0f, 0.7f};
 bool model_spin = true;
-int model_deform = 1;
+bool model_deform = true;
+
+bool animation_paused = false;
+float animation_direction = 1.0f;
+float animation_time = 0.0f;
+double last_real_time = 0.0;
 
 Matrix identity() {
 	Matrix result{};
@@ -65,7 +68,7 @@ Matrix identity() {
 	result.m[1][1] = 1.0f;
 	result.m[2][2] = 1.0f;
 	result.m[3][3] = 1.0f;
-	
+
 	return result;
 }
 
@@ -167,7 +170,7 @@ VkShaderModule loadShaderModule(const char* path) {
 VulkanBuffer createBuffer(size_t size, void *data, VkBufferUsageFlags usage) {
 	VkDevice& device = veekay::app.vk_device;
 	VkPhysicalDevice& physical_device = veekay::app.vk_physical_device;
-	
+
 	VulkanBuffer result{};
 
 	{
@@ -333,18 +336,9 @@ void initialize() {
 				.format = VK_FORMAT_R32G32B32_SFLOAT, // NOTE: 3-component vector of floats
 				.offset = offsetof(Vertex, position), // NOTE: Offset of "position" field in a Vertex struct
 			},
-			// NOTE: If you want more attributes per vertex, declare them here
-#if 0
-			{
-				.location = 1, // NOTE: Second attribute
-				.binding = 0,
-				.format = VK_FORMAT_XXX,
-				.offset = offset(Vertex, your_attribute),
-			},
-#endif
 		};
 
-		// NOTE: Bring 
+		// NOTE: Bring
 		VkPipelineVertexInputStateCreateInfo input_state_info{
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
 			.vertexBindingDescriptionCount = 1,
@@ -452,7 +446,7 @@ void initialize() {
 			veekay::app.running = false;
 			return;
 		}
-		
+
 		VkGraphicsPipelineCreateInfo info{
 			.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
 			.stageCount = 2,
@@ -477,17 +471,7 @@ void initialize() {
 		}
 	}
 
-	// TODO: You define model vertices and create buffers here
-	// TODO: Index buffer has to be created here too
-	// NOTE: Look for createBuffer function
-
-	// (v0)------(v1)
-	//  |  \       |
-	//  |   `--,   |
-	//  |       \  |
-	// (v3)------(v2)
 	sphere_mesh = new SphereMesh(100, sphere_radius);
-
 
 	vertex_buffer = createBuffer(sphere_mesh->getVertices().size() * sizeof(Vertex), sphere_mesh->getVertices().data(),
 	                             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
@@ -512,39 +496,68 @@ void shutdown() {
 }
 
 void update(double time) {
+	if (last_real_time == 0.0) {
+		last_real_time = time;
+	}
+
+	double delta_time = time - last_real_time;
+	last_real_time = time;
+
+	if (!animation_paused) {
+		animation_time += static_cast<float>(delta_time) * animation_direction;
+	}
+
 	ImGui::Begin("Controls:");
+
+	ImGui::SeparatorText("Animation Control");
+
+	if (animation_paused) {
+		if (ImGui::Button("Resume", ImVec2(100, 0))) {
+			animation_paused = false;
+		}
+	} else {
+		if (ImGui::Button("Pause", ImVec2(100, 0))) {
+			animation_paused = true;
+		}
+	}
+
+	ImGui::SameLine();
+
+	if (ImGui::Button("Reverse", ImVec2(100, 0))) {
+		animation_direction *= -1.0f;
+	}
+
+	ImGui::SameLine();
+
+	ImGui::Text("%s", animation_direction > 0 ? "Forward" : "Backward");
+
+
+	ImGui::Separator();
 
 	ImGui::InputFloat3("Translation", reinterpret_cast<float*>(&model_position));
 	ImGui::SliderFloat("Rotation", &model_rotation, 0.0f, 2.0f * M_PI);
 	ImGui::Checkbox("Spin?", &model_spin);
 
-	ImGui::SliderFloat("deformation", &model_deformation, 1.0f, 3.0f);
+	ImGui::Checkbox("Deform?", &model_deform);
 
-	ImGui::Text("Mode:");
-	ImGui::SameLine();
-	ImGui::RadioButton("b", &model_deform, 1);
-	ImGui::SameLine();
-	ImGui::RadioButton("p", &model_deform, 0);
-	ImGui::SameLine();
-	ImGui::RadioButton("f", &model_deform, 2);
-	// TODO: Your GUI stuff here
+	ImGui::End();
 
-	// NOTE: Animation code and other runtime variable updates go here
 	if (model_spin) {
-		model_rotation = static_cast<float>(time);
+		model_rotation = animation_time;
 	}
-	if (model_deform == 1) {
-		model_deformation = std::sin(static_cast<float>(time)) + 2;
-	}else if (model_deform == 2) {
-		model_deformation = std::sin(static_cast<float>(-time)) + 2;
+
+
+	if (model_deform) {
+		model_deformation = std::sin(animation_time) + 2.0f;
 	}
 
 	model_rotation = fmodf(model_rotation, 2.0f * M_PI);
-	ImGui::End();
 }
 
 void render(VkCommandBuffer cmd, VkFramebuffer framebuffer) {
 	vkResetCommandBuffer(cmd, 0);
+
+	// Обновляем буферы сферы при активной деформации
 	if (model_deform) {
 		updateSphereBuffers();
 	}
@@ -581,21 +594,18 @@ void render(VkCommandBuffer cmd, VkFramebuffer framebuffer) {
 		vkCmdBeginRenderPass(cmd, &info, VK_SUBPASS_CONTENTS_INLINE);
 	}
 
-	// TODO: Vulkan rendering code here
-	// NOTE: ShaderConstant updates, vkCmdXXX expected to be here
 	{
-		// NOTE: Use our new shiny graphics pipeline
+		// NOTE: Use our graphics pipeline
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 
-
-		// NOTE: Use our quad vertex buffer
+		// NOTE: Use our vertex buffer
 		VkDeviceSize offset = 0;
 		vkCmdBindVertexBuffers(cmd, 0, 1, &vertex_buffer.buffer, &offset);
 
-		// NOTE: Use our quad index buffer
+		// NOTE: Use our index buffer
 		vkCmdBindIndexBuffer(cmd, index_buffer.buffer, offset, VK_INDEX_TYPE_UINT32);
 
-		// NOTE: Variables like model_XXX were declared globally
+		// NOTE: Setup shader constants
 		ShaderConstants constants{
 			.projection = projection(
 				camera_fov,
@@ -613,7 +623,7 @@ void render(VkCommandBuffer cmd, VkFramebuffer framebuffer) {
 		                   VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
 		                   0, sizeof(ShaderConstants), &constants);
 
-		// NOTE: Draw 6 indices (3 vertices * 2 triangles), 1 group, no offsets
+		// NOTE: Draw indexed geometry
 		vkCmdDrawIndexed(cmd, sphere_index_count, 1, 0, 0, 0);
 	}
 
