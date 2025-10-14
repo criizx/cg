@@ -1,3 +1,4 @@
+#include <cmath>
 #include <cstdint>
 #include <climits>
 #include <vector>
@@ -46,10 +47,16 @@ VkPipeline pipeline;
 VulkanBuffer vertex_buffer;
 VulkanBuffer index_buffer;
 
+SphereMesh* sphere_mesh = nullptr;
+float sphere_radius = 1.0f;
+bool sphere_needs_update = false;
+
 Vector model_position = {0.0f, 0.0f, 5.0f};
 float model_rotation;
+float model_deformation;
 Vector model_color = {0.5f, 1.0f, 0.7f };
 bool model_spin = true;
+bool model_deform = true;
 
 Matrix identity() {
 	Matrix result{};
@@ -198,7 +205,7 @@ VulkanBuffer createBuffer(size_t size, void *data, VkBufferUsageFlags usage) {
 		                                    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 
 		// NOTE: Linear search through types of memory until
-		//       one type matches the requirements, thats the index of memory type
+		//       one type matches the requirements, that's the index of memory type
 		uint32_t index = UINT_MAX;
 		for (uint32_t i = 0; i < properties.memoryTypeCount; ++i) {
 			const VkMemoryType& type = properties.memoryTypes[i];
@@ -251,6 +258,28 @@ void destroyBuffer(const VulkanBuffer& buffer) {
 	vkFreeMemory(device, buffer.memory, nullptr);
 	vkDestroyBuffer(device, buffer.buffer, nullptr);
 }
+
+void updateSphereBuffers() {
+	VkDevice& device = veekay::app.vk_device;
+
+	vkDeviceWaitIdle(device);
+
+	sphere_mesh->changeRadius(model_deformation);
+
+	destroyBuffer(vertex_buffer);
+	destroyBuffer(index_buffer);
+
+	vertex_buffer = createBuffer(
+		sphere_mesh->getVertices().size() * sizeof(Vertex),
+		sphere_mesh->getVertices().data(),
+		VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+
+	index_buffer = createBuffer(
+		sphere_mesh->getIndices().size() * sizeof(uint32_t),
+		sphere_mesh->getIndices().data(),
+		VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+}
+
 
 void initialize() {
 	VkDevice& device = veekay::app.vk_device;
@@ -457,15 +486,15 @@ void initialize() {
 	//  |   `--,   |
 	//  |       \  |
 	// (v3)------(v2)
-	SphereMesh sphere(100);
+	sphere_mesh = new SphereMesh(100, sphere_radius);
 
 
-	vertex_buffer = createBuffer(sphere.getVertices().size() * sizeof(Vertex), sphere.getVertices().data(),
+	vertex_buffer = createBuffer(sphere_mesh->getVertices().size() * sizeof(Vertex), sphere_mesh->getVertices().data(),
 	                             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
 
-	index_buffer = createBuffer(sphere.getIndices().size() * sizeof(uint32_t), sphere.getIndices().data(),
+	index_buffer = createBuffer(sphere_mesh->getIndices().size() * sizeof(uint32_t), sphere_mesh->getIndices().data(),
 	                            VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
-	sphere_index_count = sphere.getIndices().size();
+	sphere_index_count = sphere_mesh->getIndices().size();
 }
 
 void shutdown() {
@@ -474,6 +503,7 @@ void shutdown() {
 	// NOTE: Destroy resources here, do not cause leaks in your program!
 	destroyBuffer(index_buffer);
 	destroyBuffer(vertex_buffer);
+	delete sphere_mesh;
 
 	vkDestroyPipeline(device, pipeline, nullptr);
 	vkDestroyPipelineLayout(device, pipeline_layout, nullptr);
@@ -486,12 +516,16 @@ void update(double time) {
 	ImGui::InputFloat3("Translation", reinterpret_cast<float*>(&model_position));
 	ImGui::SliderFloat("Rotation", &model_rotation, 0.0f, 2.0f * M_PI);
 	ImGui::Checkbox("Spin?", &model_spin);
+	ImGui::Checkbox("deform", &model_deform);
 	// TODO: Your GUI stuff here
 	ImGui::End();
 
 	// NOTE: Animation code and other runtime variable updates go here
 	if (model_spin) {
-		model_rotation = float(time);
+		model_rotation = static_cast<float>(time);
+	}
+	if (model_deform) {
+		model_deformation = std::sin(static_cast<float>(time)) + 2;
 	}
 
 	model_rotation = fmodf(model_rotation, 2.0f * M_PI);
@@ -499,6 +533,9 @@ void update(double time) {
 
 void render(VkCommandBuffer cmd, VkFramebuffer framebuffer) {
 	vkResetCommandBuffer(cmd, 0);
+	if (model_deform) {
+		updateSphereBuffers();
+	}
 
 	{ // NOTE: Start recording rendering commands
 		VkCommandBufferBeginInfo info{
