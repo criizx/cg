@@ -56,7 +56,7 @@ float model_rotation;
 float model_deformation;
 Vector model_color = {0.5f, 1.0f, 0.7f };
 bool model_spin = true;
-bool model_deform = true;
+int model_deform = 1;
 
 Matrix identity() {
 	Matrix result{};
@@ -513,22 +513,34 @@ void shutdown() {
 
 void update(double time) {
 	ImGui::Begin("Controls:");
+
 	ImGui::InputFloat3("Translation", reinterpret_cast<float*>(&model_position));
 	ImGui::SliderFloat("Rotation", &model_rotation, 0.0f, 2.0f * M_PI);
 	ImGui::Checkbox("Spin?", &model_spin);
-	ImGui::Checkbox("deform", &model_deform);
+
+	ImGui::SliderFloat("deformation", &model_deformation, 1.0f, 3.0f);
+
+	ImGui::Text("Mode:");
+	ImGui::SameLine();
+	ImGui::RadioButton("b", &model_deform, 1);
+	ImGui::SameLine();
+	ImGui::RadioButton("p", &model_deform, 0);
+	ImGui::SameLine();
+	ImGui::RadioButton("f", &model_deform, 2);
 	// TODO: Your GUI stuff here
-	ImGui::End();
 
 	// NOTE: Animation code and other runtime variable updates go here
 	if (model_spin) {
 		model_rotation = static_cast<float>(time);
 	}
-	if (model_deform) {
+	if (model_deform == 1) {
 		model_deformation = std::sin(static_cast<float>(time)) + 2;
+	}else if (model_deform == 2) {
+		model_deformation = std::sin(static_cast<float>(-time)) + 2;
 	}
 
 	model_rotation = fmodf(model_rotation, 2.0f * M_PI);
+	ImGui::End();
 }
 
 void render(VkCommandBuffer cmd, VkFramebuffer framebuffer) {
