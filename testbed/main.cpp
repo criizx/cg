@@ -6,6 +6,7 @@
 #include <cmath>
 
 #include <veekay/veekay.hpp>
+#include "sphere.h"
 
 #include <imgui.h>
 #include <vulkan/vulkan_core.h>
@@ -16,18 +17,13 @@ constexpr float camera_fov = 70.0f;
 constexpr float camera_near_plane = 0.01f;
 constexpr float camera_far_plane = 100.0f;
 
+uint32_t sphere_index_count = 0;
+
 struct Matrix {
 	float m[4][4];
 };
 
-struct Vector {
-	float x, y, z;
-};
 
-struct Vertex {
-	Vector position;
-	// NOTE: You can add more attributes
-};
 
 // NOTE: These variable will be available to shaders through push constant uniform
 struct ShaderConstants {
@@ -461,20 +457,15 @@ void initialize() {
 	//  |   `--,   |
 	//  |       \  |
 	// (v3)------(v2)
-	Vertex vertices[] = {
-		{{-1.0f, -1.0f, 0.0f}},
-		{{1.0f, -1.0f, 0.0f}},
-		{{1.0f, 1.0f, 0.0f}},
-		{{-1.0f, 1.0f, 0.0f}},
-	};
+	SphereMesh sphere(100);
 
-	uint32_t indices[] = { 0, 1, 2, 2, 3, 0 };
 
-	vertex_buffer = createBuffer(sizeof(vertices), vertices,
+	vertex_buffer = createBuffer(sphere.getVertices().size() * sizeof(Vertex), sphere.getVertices().data(),
 	                             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
 
-	index_buffer = createBuffer(sizeof(indices), indices,
+	index_buffer = createBuffer(sphere.getIndices().size() * sizeof(uint32_t), sphere.getIndices().data(),
 	                            VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+	sphere_index_count = sphere.getIndices().size();
 }
 
 void shutdown() {
@@ -574,7 +565,7 @@ void render(VkCommandBuffer cmd, VkFramebuffer framebuffer) {
 		                   0, sizeof(ShaderConstants), &constants);
 
 		// NOTE: Draw 6 indices (3 vertices * 2 triangles), 1 group, no offsets
-		vkCmdDrawIndexed(cmd, 6, 1, 0, 0, 0);
+		vkCmdDrawIndexed(cmd, sphere_index_count, 1, 0, 0, 0);
 	}
 
 	vkCmdEndRenderPass(cmd);

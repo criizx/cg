@@ -3,7 +3,9 @@ include(FetchContent)
 
 project(testbed LANGUAGES C CXX)
 
-add_executable(${PROJECT_NAME} main.cpp)
+add_executable(${PROJECT_NAME} main.cpp
+        sphere.h
+		sphere.cpp)
 
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD_REQUIRED TRUE CXX_STANDARD 20)
 
