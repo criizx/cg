@@ -22,17 +22,18 @@ constexpr std::pair<int, int> calculateSphereParameters(int targetVertices) {
 			int diff = std::abs(vertices_count - targetVertices);
 			float quality = 1.0f / (diff + 1) * (1.0f - std::abs(ratio - 1.0f) * 0.5f);
 
-			if (quality > best_quality) {
+			if (quality > best_quality || best_quality == 0.0f) {
 				best_quality = quality;
 				best_sector = sector;
 				best_stack = stack;
+				best_diff = diff;
 			}
 		}
 	}
 	return {best_sector, best_stack};
 }
 
-std::vector<uint32_t> generateSphereIndices(const int sectorCount,const int stackCount) {
+std::vector<uint32_t> generateSphereIndices(const int sectorCount, const int stackCount) {
 	std::vector<uint32_t> indices;
 	int k1, k2;
 
@@ -82,14 +83,12 @@ void SphereMesh::updateVertices() {
 	currentVertices.reserve(basePoints.size());
 
 	for (const auto& point : basePoints) {
-		float x = currentRadius * point.sinTheta * std::cos(point.phi);
-		float y = currentRadius * point.sinTheta * std::sin(point.phi);
-		float z = currentRadius * point.cosTheta;
+		float x = currentRadius * point.cosTheta * std::cos(point.phi);
+		float y = currentRadius * point.cosTheta * std::sin(point.phi);
+		float z = currentRadius * point.sinTheta;
 		currentVertices.emplace_back(x, y, z);
 	}
-
 }
-
 
 void SphereMesh::changeRadius(const float newRadius) {
 	if (std::abs(currentRadius - newRadius) < 1e-6f) {
@@ -104,11 +103,9 @@ SphereMesh::SphereMesh(const int targetVertices, const float radius) : currentRa
 	auto [sectors, stacks] = calculateSphereParameters(targetVertices);
 
 	basePoints = generateSphereBasePoints(sectors, stacks);
-
 	indices = generateSphereIndices(sectors, stacks);
-	currentRadius = radius;
 
-	changeRadius(radius);
+	updateVertices();
 }
 
 std::vector<Vertex>& SphereMesh::getVertices() {
