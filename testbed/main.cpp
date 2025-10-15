@@ -10,6 +10,8 @@
 #include <imgui.h>
 #include <vulkan/vulkan_core.h>
 
+#include "sphere_gen.h"
+
 namespace {
 
 constexpr float camera_fov = 70.0f;
@@ -18,15 +20,6 @@ constexpr float camera_far_plane = 100.0f;
 
 struct Matrix {
 	float m[4][4];
-};
-
-struct Vector {
-	float x, y, z;
-};
-
-struct Vertex {
-	Vector position;
-	// NOTE: You can add more attributes
 };
 
 // NOTE: These variable will be available to shaders through push constant uniform
@@ -47,13 +40,27 @@ VkPipelineLayout pipeline_layout;
 VkPipeline pipeline;
 
 // NOTE: Declare buffers and other variables here
-VulkanBuffer vertex_buffer;
-VulkanBuffer index_buffer;
+VulkanBuffer cube_vertex_buffer;
+VulkanBuffer cube_index_buffer;
 
-Vector model_position = {0.0f, 0.0f, 5.0f};
+VulkanBuffer sphere_vertex_buffer;
+VulkanBuffer sphere_index_buffer;
+
+int SphereIndexSize = 0;
+
+Vector cube_position = {0.0f, 0.0f, 5.0f};
+
 float model_rotation;
-Vector model_color = {0.5f, 1.0f, 0.7f };
+float sphere_translation;
+
+Vector cube_color = {0.5f, 1.0f, 0.7f };
+Vector sphere_color = {0.988f, 0.733f, 0.855f};
+
 bool model_spin = true;
+bool sphere_movement = true;
+
+float sphereSpinCoeff = 1.0f;
+float sphereRotationRadius = 3.0f;
 
 Matrix identity() {
 	Matrix result{};
@@ -461,28 +468,58 @@ void initialize() {
 	//  |   `--,   |
 	//  |       \  |
 	// (v3)------(v2)
-	Vertex vertices[] = {
-		{{-1.0f, -1.0f, 0.0f}},
-		{{1.0f, -1.0f, 0.0f}},
-		{{1.0f, 1.0f, 0.0f}},
-		{{-1.0f, 1.0f, 0.0f}},
+	Vertex cube_vertices[] = {
+		{{-1.0f, -1.0f, -1.0f}},
+		{{1.0f, -1.0f, -1.0f}},
+		{{1.0f, 1.0f, -1.0f}},
+		{{-1.0f, 1.0f, -1.0f}},
+		{{-1.0f, -1.0f, 1.0f}},
+		{{1.0f, -1.0f, 1.0f}},
+		{{1.0f, 1.0f, 1.0f}},
+		{{-1.0f, 1.0f, 1.0f}},
 	};
 
-	uint32_t indices[] = { 0, 1, 2, 2, 3, 0 };
+	uint32_t cube_indices[] = {
+		0, 1, 2, 2, 3, 0,
+		6, 5, 4, 4, 7, 6,
+		3, 2, 6, 6, 7, 3,
+		0, 1, 5, 5, 4, 0,
+		5, 6, 2, 2, 1, 5,
+		0, 3, 7, 7, 4, 0
+	};
 
-	vertex_buffer = createBuffer(sizeof(vertices), vertices,
+	cube_vertex_buffer = createBuffer(sizeof(cube_vertices), cube_vertices,
 	                             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
 
-	index_buffer = createBuffer(sizeof(indices), indices,
+	cube_index_buffer = createBuffer(sizeof(cube_indices), cube_indices,
 	                            VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+
+	std::vector<Vertex> sphere_vertices;
+	std::vector<uint32_t> sphere_indices;
+
+	// v functiu mojno peredat' parametry spheri sm. -> sphere_gen.h
+	auto [vertices, indices] = sphereGen(0.5f);
+	sphere_vertices = std::move(vertices);
+	sphere_indices = std::move(indices);
+
+	sphere_vertex_buffer = createBuffer(sphere_vertices.size() * sizeof(Vertex), sphere_vertices.data(),
+										VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+
+	sphere_index_buffer = createBuffer(sphere_indices.size() * sizeof(uint32_t), sphere_indices.data(),
+										VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+
+	SphereIndexSize = sphere_indices.size();
 }
 
 void shutdown() {
 	VkDevice& device = veekay::app.vk_device;
 
 	// NOTE: Destroy resources here, do not cause leaks in your program!
-	destroyBuffer(index_buffer);
-	destroyBuffer(vertex_buffer);
+	destroyBuffer(cube_index_buffer);
+	destroyBuffer(cube_vertex_buffer);
+
+	destroyBuffer(sphere_index_buffer);
+	destroyBuffer(sphere_vertex_buffer);
 
 	vkDestroyPipeline(device, pipeline, nullptr);
 	vkDestroyPipelineLayout(device, pipeline_layout, nullptr);
@@ -492,9 +529,18 @@ void shutdown() {
 
 void update(double time) {
 	ImGui::Begin("Controls:");
-	ImGui::InputFloat3("Translation", reinterpret_cast<float*>(&model_position));
-	ImGui::SliderFloat("Rotation", &model_rotation, 0.0f, 2.0f * M_PI);
+	ImGui::InputFloat3("Cube translation", reinterpret_cast<float*>(&cube_position));
+
+	ImGui::SliderFloat("Cube rotation", &model_rotation, 0.0f, 2.0f * M_PI);
 	ImGui::Checkbox("Spin?", &model_spin);
+
+	ImGui::SeparatorText("Sphere");
+
+	ImGui::SliderFloat("Rotation", &sphere_translation, 0.0f, 2.0f * M_PI);
+	ImGui::Checkbox("Spin", &sphere_movement);
+	ImGui::NewLine();
+	ImGui::SliderFloat("Rotation speed",  &sphereSpinCoeff, 0.1f, 5.0f);
+	ImGui::SliderFloat("Radius", &sphereRotationRadius, 0.0f, 10.0f);
 	// TODO: Your GUI stuff here
 	ImGui::End();
 
@@ -502,8 +548,12 @@ void update(double time) {
 	if (model_spin) {
 		model_rotation = float(time);
 	}
+	if (sphere_movement) {
+		sphere_translation = float(time * sphereSpinCoeff);
+	}
 
 	model_rotation = fmodf(model_rotation, 2.0f * M_PI);
+	sphere_translation = fmodf(sphere_translation, 2.0f * M_PI);
 }
 
 void render(VkCommandBuffer cmd, VkFramebuffer framebuffer) {
@@ -550,11 +600,9 @@ void render(VkCommandBuffer cmd, VkFramebuffer framebuffer) {
 
 		// NOTE: Use our quad vertex buffer
 		VkDeviceSize offset = 0;
-		vkCmdBindVertexBuffers(cmd, 0, 1, &vertex_buffer.buffer, &offset);
-
+		vkCmdBindVertexBuffers(cmd, 0, 1, &cube_vertex_buffer.buffer, &offset);
 		// NOTE: Use our quad index buffer
-		vkCmdBindIndexBuffer(cmd, index_buffer.buffer, offset, VK_INDEX_TYPE_UINT32);
-
+		vkCmdBindIndexBuffer(cmd, cube_index_buffer.buffer, offset, VK_INDEX_TYPE_UINT32);
 		// NOTE: Variables like model_XXX were declared globally
 		ShaderConstants constants{
 			.projection = projection(
@@ -563,9 +611,9 @@ void render(VkCommandBuffer cmd, VkFramebuffer framebuffer) {
 				camera_near_plane, camera_far_plane),
 
 			.transform = multiply(rotation({0.0f, 1.0f, 0.0f}, model_rotation),
-			                      translation(model_position)),
+			                      translation(cube_position)),
 
-			.color = model_color,
+			.color = cube_color,
 		};
 
 		// NOTE: Update constant memory with new shader constants
@@ -574,8 +622,35 @@ void render(VkCommandBuffer cmd, VkFramebuffer framebuffer) {
 		                   0, sizeof(ShaderConstants), &constants);
 
 		// NOTE: Draw 6 indices (3 vertices * 2 triangles), 1 group, no offsets
-		vkCmdDrawIndexed(cmd, 6, 1, 0, 0, 0);
+		vkCmdDrawIndexed(cmd, 36, 1, 0, 0, 0);
 	}
+	{
+		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+
+
+		VkDeviceSize offset = 0;
+		vkCmdBindVertexBuffers(cmd, 0, 1, &sphere_vertex_buffer.buffer, &offset);
+
+		vkCmdBindIndexBuffer(cmd, sphere_index_buffer.buffer, offset, VK_INDEX_TYPE_UINT32);
+
+		ShaderConstants constants{
+			.projection = projection(
+				camera_fov,
+				float(veekay::app.window_width) / float(veekay::app.window_height),
+				camera_near_plane, camera_far_plane),
+
+			.transform = multiply(rotation({0.0f, -1.0f, 0.0f}, model_rotation),
+								  translation({cube_position.x + sphereRotationRadius * cosf(sphere_translation), cube_position.y, cube_position.z + sphereRotationRadius * sinf(sphere_translation)})),
+			.color = sphere_color,
+		};
+
+		vkCmdPushConstants(cmd, pipeline_layout,
+						   VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+						   0, sizeof(ShaderConstants), &constants);
+
+		vkCmdDrawIndexed(cmd, SphereIndexSize, 1, 0, 0, 0);
+	}
+
 
 	vkCmdEndRenderPass(cmd);
 	vkEndCommandBuffer(cmd);
