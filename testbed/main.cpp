@@ -45,6 +45,9 @@ VkPipeline pipeline;
 VulkanBuffer vertex_buffer;
 VulkanBuffer index_buffer;
 
+float xyCameraRotation = 0;
+float zCameraRotation = 0;
+
 SphereMesh* sphere_mesh = nullptr;
 float sphere_radius = 1.0f;
 bool sphere_needs_update = false;
@@ -540,6 +543,11 @@ void update(double time) {
 
 	ImGui::Checkbox("Deform?", &model_deform);
 
+	ImGui::SeparatorText("Camera Control");
+	ImGui::SliderFloat("Camera Rotation XY", &xyCameraRotation, -1.0f * M_PI, 1.0f * M_PI);
+	ImGui::SliderFloat("Camera Rotation Z", &zCameraRotation, -0.5f * M_PI, 0.5f * M_PI);
+
+
 	ImGui::End();
 
 	if (model_spin) {
@@ -557,7 +565,6 @@ void update(double time) {
 void render(VkCommandBuffer cmd, VkFramebuffer framebuffer) {
 	vkResetCommandBuffer(cmd, 0);
 
-	// Обновляем буферы сферы при активной деформации
 	if (model_deform) {
 		updateSphereBuffers();
 	}
@@ -612,8 +619,8 @@ void render(VkCommandBuffer cmd, VkFramebuffer framebuffer) {
 				float(veekay::app.window_width) / float(veekay::app.window_height),
 				camera_near_plane, camera_far_plane),
 
-			.transform = multiply(rotation({0.0f, 1.0f, 0.0f}, model_rotation),
-			                      translation(model_position)),
+			.transform = multiply(multiply(rotation({0.0f, 1.0f, 0.0f}, model_rotation),
+			                      translation(model_position)), multiply(rotation({0.0f, 1.0f, 0.0f}, xyCameraRotation), rotation({1.0f, 0.0f, 0.0f}, zCameraRotation))),
 
 			.color = model_color,
 		};
