@@ -16,7 +16,7 @@ namespace {
 
 constexpr float camera_fov = 70.0f;
 constexpr float camera_near_plane = 0.01f;
-constexpr float camera_far_plane = 100.0f;
+constexpr float camera_far_plane = 10000.0f;
 
 uint32_t sphere_index_count = 0;
 
@@ -64,6 +64,13 @@ float animation_direction = 1.0f;
 float animation_time = 0.0f;
 double last_real_time = 0.0;
 
+Matrix perspective_projection(float fov, float aspect_ratio, float near, float far);
+Matrix orthographic_projection(float fov, float aspect_ratio, float near, float far);
+
+Matrix (*ProjectionType)(float fov, float aspect_ratio, float near, float far) = perspective_projection;
+
+bool ProjectionFlag = true;
+
 Matrix identity() {
 	Matrix result{};
 
@@ -75,7 +82,7 @@ Matrix identity() {
 	return result;
 }
 
-Matrix projection(float fov, float aspect_ratio, float near, float far) {
+Matrix perspective_projection(float fov, float aspect_ratio, float near, float far) {
 	Matrix result{};
 
 	const float radians = fov * M_PI / 180.0f;
@@ -87,6 +94,21 @@ Matrix projection(float fov, float aspect_ratio, float near, float far) {
 
 	result.m[2][2] = far / (far - near);
 	result.m[3][2] = (-near * far) / (far - near);
+
+	return result;
+}
+
+Matrix orthographic_projection(float fov, float aspect_ratio, float near, float far) {
+	const float half_height = tanf(fov * 0.5f * M_PI / 180.0f);
+	const float half_width = half_height * aspect_ratio;
+
+	Matrix result{};
+
+	result.m[0][0] = 1.0f / half_width;
+	result.m[1][1] = -1.0f / half_height;
+	result.m[2][2] = 1.0f / (far - near);
+	result.m[3][2] = -near / (far - near);
+	result.m[3][3] = 1.0f;
 
 	return result;
 }
@@ -547,6 +569,11 @@ void update(double time) {
 	ImGui::SliderFloat("Camera Rotation XY", &xyCameraRotation, -1.0f * M_PI, 1.0f * M_PI);
 	ImGui::SliderFloat("Camera Rotation Z", &zCameraRotation, -0.5f * M_PI, 0.5f * M_PI);
 
+	ImGui::Separator();
+
+	ImGui::Checkbox("Projection type", &ProjectionFlag);
+	ImGui::SameLine();
+	ImGui::Text("%s", ProjectionFlag ? "Orthographic" : "Perspective");
 
 	ImGui::End();
 
@@ -557,6 +584,13 @@ void update(double time) {
 
 	if (model_deform) {
 		model_deformation = std::sin(animation_time) + 2.0f;
+	}
+
+	if (ProjectionFlag) {
+		ProjectionType = orthographic_projection;
+	}else {
+		ProjectionType = perspective_projection;
+
 	}
 
 	model_rotation = fmodf(model_rotation, 2.0f * M_PI);
@@ -614,7 +648,7 @@ void render(VkCommandBuffer cmd, VkFramebuffer framebuffer) {
 
 		// NOTE: Setup shader constants
 		ShaderConstants constants{
-			.projection = projection(
+			.projection = ProjectionType(
 				camera_fov,
 				float(veekay::app.window_width) / float(veekay::app.window_height),
 				camera_near_plane, camera_far_plane),
